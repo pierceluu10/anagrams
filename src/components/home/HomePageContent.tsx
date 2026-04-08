@@ -16,7 +16,7 @@ export function HomePageContent() {
       <div className="mx-auto flex w-full max-w-md flex-col items-stretch gap-5 lg:mx-0 lg:justify-self-center">
         <div className="space-y-2 text-center">
           <h1 className="font-headline text-4xl font-bold italic tracking-tighter text-[#cec1e1] sm:text-5xl">
-            Swagrams
+            littlekaitlan16
           </h1>
           <p className="font-body text-sm leading-relaxed text-on-surface-variant sm:text-base">
             Play 6-letter anagrams solo or with others
