@@ -2,17 +2,24 @@
 
 // Swagrams — solo play
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { usePageTransition } from "@/components/PageTransition";
+import { CountdownPulse } from "@/components/stitch/CountdownPulse";
 import { StickyScoreboard } from "@/components/stitch/StickyScoreboard";
+import { SubmissionFeedback } from "@/components/stitch/SubmissionFeedback";
+import { TileFlightLayer, type TileFlightPayload } from "@/components/stitch/TileFlightLayer";
 import { useSoloStitchGame } from "@/lib/hooks/useSoloStitchGame";
+import { rackIndicesForTypedWord } from "@/lib/game/engine";
 
 const TIMER_CIRCUMFERENCE = 377;
 
 export default function SoloPage() {
   const router = useRouter();
+  const { navigateHome } = usePageTransition();
   const {
     active,
+    started,
     completed,
     countdown,
     start,
@@ -24,13 +31,24 @@ export default function SoloPage() {
     error,
     slotLetters,
     letterButtons,
+    displayRack,
     rack,
+    typed,
     submittedWords,
     submit,
     clearWord,
     shuffleRack,
     typeChar
   } = useSoloStitchGame();
+
+  const [flight, setFlight] = useState<TileFlightPayload | null>(null);
+  const flightId = useRef(0);
+  const prevTypedLen = useRef(0);
+  const prevTypedStr = useRef("");
+  const rackBtnRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const slotRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  const consumedRack = useMemo(() => new Set(rackIndicesForTypedWord(typed, displayRack)), [typed, displayRack]);
 
   useEffect(() => {
     if (!completed) return;
@@ -41,85 +59,225 @@ export default function SoloPage() {
     router.push("/results");
   }, [completed, rack, score, submittedWords, router]);
 
+  useEffect(() => {
+    if (!active) {
+      prevTypedLen.current = typed.length;
+      prevTypedStr.current = typed;
+      return;
+    }
+
+    const prevLen = prevTypedLen.current;
+    const curLen = typed.length;
+
+    if (curLen > prevLen) {
+      const indices = rackIndicesForTypedWord(typed, displayRack);
+      const rackIdx = indices[indices.length - 1];
+      const slotIdx = curLen - 1;
+      const ch = typed[slotIdx];
+      if (ch !== undefined && rackIdx !== undefined) {
+        const rackEl = rackBtnRefs.current[rackIdx];
+        const slotEl = slotRefs.current[slotIdx];
+        if (rackEl && slotEl) {
+          flightId.current += 1;
+          setFlight({
+            id: flightId.current,
+            char: ch,
+            from: rackEl.getBoundingClientRect(),
+            to: slotEl.getBoundingClientRect()
+          });
+        }
+      }
+    } else if (curLen < prevLen) {
+      const removedChar = prevTypedStr.current[prevLen - 1];
+      const prevIndices = rackIndicesForTypedWord(prevTypedStr.current, displayRack);
+      const rackIdx = prevIndices[prevLen - 1];
+      const slotIdx = prevLen - 1;
+      if (removedChar !== undefined && rackIdx !== undefined) {
+        const rackEl = rackBtnRefs.current[rackIdx];
+        const slotEl = slotRefs.current[slotIdx];
+        if (rackEl && slotEl) {
+          flightId.current += 1;
+          setFlight({
+            id: flightId.current,
+            char: removedChar,
+            from: slotEl.getBoundingClientRect(),
+            to: rackEl.getBoundingClientRect(),
+            reverse: true
+          });
+        }
+      }
+    }
+
+    prevTypedLen.current = curLen;
+    prevTypedStr.current = typed;
+  }, [typed, active, displayRack]);
+
+  const clearFlight = useCallback(() => setFlight(null), []);
+
   const strokeDashoffset = String((1 - timerProgress) * TIMER_CIRCUMFERENCE);
 
+  const showStart = !started && !completed && countdown === null;
+  const showCountdown = countdown !== null;
+  const showPlayfield = active;
+
+  const slotCallbacks = useMemo(
+    () => Array.from({ length: 6 }, (_, i) => (el: HTMLDivElement | null) => {
+      slotRefs.current[i] = el;
+    }),
+    []
+  );
+
+  const rackCallbacks = useMemo(
+    () =>
+      Array.from({ length: 6 }, (_, i) => (el: HTMLButtonElement | null) => {
+        rackBtnRefs.current[i] = el;
+      }),
+    []
+  );
+
   return (
-    <main className="w-full max-w-6xl mx-auto">
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center">
-        <div className="lg:col-span-3">
-          <StickyScoreboard points={score} wordsFound={wordsFound} lastWord={lastWord} />
-        </div>
-
-        <div className="lg:col-span-9 flex flex-col items-center gap-12">
-          {!active && !completed && countdown === null ? (
-            <button className="px-16 py-4 bg-primary text-on-primary font-headline font-bold rounded-xl hover:opacity-90 active:scale-95 transition-all shadow-xl shadow-primary/20 text-lg" onClick={start} type="button">
-              Start
-            </button>
-          ) : null}
-          {countdown !== null ? <p className="font-headline font-extrabold text-7xl text-primary">{countdown}</p> : null}
-
-          <div className="flex flex-col items-center gap-4">
-            <div className="relative flex h-32 w-32 shrink-0 items-center justify-center">
-              <svg className="pointer-events-none absolute inset-0 h-full w-full -rotate-90" aria-hidden>
-                <circle className="text-outline/20" cx="64" cy="64" fill="none" r="60" stroke="currentColor" strokeWidth="6"></circle>
-                <circle className="text-primary transition-all duration-1000" cx="64" cy="64" fill="none" r="60" stroke="currentColor" strokeDasharray="377" strokeDashoffset={strokeDashoffset} strokeWidth="6"></circle>
-              </svg>
-              <div className="relative z-10 flex flex-col items-center justify-center gap-1 px-1 text-center">
-                <span className="text-[11px] font-label uppercase tracking-[0.2em] text-on-surface-variant">Timer</span>
-                <span className="font-headline text-3xl font-bold tabular-nums leading-none text-on-surface">{timerLabel}</span>
-              </div>
-            </div>
-          </div>
-
-          <div className="w-full max-w-2xl">
-            <div className="flex justify-center gap-3 p-6 bg-surface-container-lowest rounded-2xl border border-outline-variant/10 shadow-2xl">
-              {slotLetters.map((ch, idx) => (
-                <div key={idx} className="w-16 h-20 bg-surface-container rounded-lg flex items-center justify-center border-b-4 border-surface-container-highest shadow-inner">
-                  <span className="text-primary font-headline font-bold text-3xl letter-pop">{ch}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-6 gap-4">
-            {letterButtons.map((letter, idx) => (
-              <button key={`${letter}-${idx}`} className="relative w-20 h-20 bg-secondary flex items-center justify-center rounded-xl shadow-[0_8px_0_#b59a6d] hover:shadow-[0_4px_0_#b59a6d] hover:translate-y-[4px] active:translate-y-[8px] active:shadow-none transition-all duration-100 group" type="button" onClick={() => typeChar(letter.toLowerCase())}>
-                <div className="absolute inset-0 grain-overlay rounded-xl"></div>
-                <span className="text-on-secondary font-headline font-extrabold text-3xl">{letter}</span>
-              </button>
-            ))}
-          </div>
-
-          <div className="flex w-full flex-wrap justify-center gap-4 sm:gap-6">
-            <button
-              className="flex min-w-[140px] flex-col items-center gap-0.5 rounded-xl bg-surface-container-high px-8 py-4 font-headline text-lg font-bold text-on-surface transition-all hover:bg-surface-container-highest active:scale-95"
-              type="button"
-              onClick={shuffleRack}
-            >
-              <span>Shuffle</span>
-              <span className="font-label text-[10px] font-semibold uppercase tracking-[0.2em] text-on-surface-variant/85">Shift</span>
-            </button>
-            <button
-              className="flex min-w-[160px] flex-col items-center gap-0.5 rounded-xl bg-primary px-10 py-4 font-headline text-lg font-bold text-on-primary shadow-xl shadow-primary/20 transition-all hover:opacity-90 active:scale-95"
-              type="button"
-              onClick={() => void submit()}
-            >
-              <span>Submit</span>
-              <span className="font-label text-[10px] font-semibold uppercase tracking-[0.2em] text-on-primary/80">Enter</span>
-            </button>
-            <button
-              className="flex min-w-[140px] flex-col items-center gap-0.5 rounded-xl bg-surface-container-low px-8 py-4 font-headline text-lg font-bold text-on-surface-variant transition-all hover:bg-surface-container-high active:scale-95"
-              type="button"
-              onClick={clearWord}
-            >
-              <span>Clear</span>
-              <span className="font-label text-[10px] font-semibold uppercase tracking-[0.2em] text-on-surface-variant/80">Esc</span>
-            </button>
-          </div>
-
-          {error ? <p className="text-center text-sm text-error">{error}</p> : null}
-        </div>
+    <>
+      <div className="fixed left-0 top-0 z-50 px-6 py-4">
+        <button
+          type="button"
+          onClick={navigateHome}
+          className="font-headline text-xl font-extrabold uppercase tracking-wide text-on-surface-variant transition-colors hover:text-primary sm:text-2xl"
+        >
+          ← Home
+        </button>
       </div>
-    </main>
+
+      <main className="relative mx-auto min-h-[calc(100dvh-3rem)] w-full max-w-[1600px] px-4 pb-20 pt-20 lg:px-6 lg:pt-24">
+        {started ? (
+          <aside className="mb-10 flex w-full justify-center lg:mb-0 lg:absolute lg:left-12 lg:top-24 lg:z-10 lg:block lg:w-auto lg:justify-start xl:left-20 2xl:left-24">
+            <div className="w-full max-w-[260px] sm:max-w-[280px]">
+              <StickyScoreboard points={score} wordsFound={wordsFound} lastWord={lastWord} />
+            </div>
+          </aside>
+        ) : null}
+
+        <div className="flex w-full flex-col items-center gap-12">
+          {showStart ? (
+            <div className="flex min-h-[calc(100dvh-7rem)] w-full items-center justify-center px-4">
+              <button
+                className="rounded-2xl bg-primary px-14 py-7 font-headline text-2xl font-extrabold uppercase tracking-wide text-on-primary shadow-[0_20px_60px_rgba(206,193,225,0.35)] transition-all hover:opacity-90 active:scale-[0.98] sm:px-20 sm:py-9 sm:text-3xl"
+                onClick={start}
+                type="button"
+              >
+                Start game
+              </button>
+            </div>
+          ) : null}
+
+          {showCountdown ? (
+            <div className="flex min-h-[calc(100dvh-7rem)] w-full flex-col items-center justify-center">
+              <CountdownPulse value={countdown!} className="w-full" />
+            </div>
+          ) : null}
+
+          {showPlayfield ? (
+            <>
+              <div className="flex w-full flex-col items-center gap-4">
+                <div className="relative flex h-32 w-32 shrink-0 items-center justify-center">
+                  <svg className="pointer-events-none absolute inset-0 h-full w-full -rotate-90" aria-hidden>
+                    <circle className="text-outline/20" cx="64" cy="64" fill="none" r="60" stroke="currentColor" strokeWidth="6"></circle>
+                    <circle
+                      className="text-primary transition-all duration-1000"
+                      cx="64"
+                      cy="64"
+                      fill="none"
+                      r="60"
+                      stroke="currentColor"
+                      strokeDasharray="377"
+                      strokeDashoffset={strokeDashoffset}
+                      strokeWidth="6"
+                    ></circle>
+                  </svg>
+                  <div className="relative z-10 flex flex-col items-center justify-center gap-1 px-1 text-center">
+                    <span className="font-label text-[11px] uppercase tracking-[0.2em] text-on-surface-variant">Timer</span>
+                    <span className="font-headline text-3xl font-bold leading-none tabular-nums text-on-surface">{timerLabel}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-2">
+                <SubmissionFeedback message={error} className="w-full" />
+                <div className="w-full">
+                  <div className="flex justify-center gap-3 rounded-2xl border border-outline-variant/10 bg-surface-container-lowest p-6 shadow-2xl">
+                    {slotLetters.map((ch, idx) => (
+                      <div
+                        key={idx}
+                        ref={slotCallbacks[idx]}
+                        className={`flex h-20 w-16 items-center justify-center rounded-lg border-b-4 shadow-inner transition-colors duration-150 ${
+                          ch
+                            ? "border-[#b59a6d] bg-secondary"
+                            : "border-surface-container-highest bg-surface-container"
+                        }`}
+                      >
+                        {ch ? (
+                          <span className="font-headline text-3xl font-extrabold text-on-secondary letter-pop">{ch}</span>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mx-auto grid w-max grid-cols-6 gap-3 sm:gap-4">
+                {letterButtons.map((letter, idx) => {
+                  const used = consumedRack.has(idx);
+                  return (
+                    <button
+                      key={`${letter}-${idx}`}
+                      ref={rackCallbacks[idx]}
+                      type="button"
+                      disabled={used}
+                      className={`relative flex h-20 w-20 items-center justify-center rounded-xl transition-all duration-150 group ${
+                        used
+                          ? "scale-90 bg-surface-container-high opacity-30 shadow-none"
+                          : "bg-secondary shadow-[0_8px_0_#b59a6d] hover:translate-y-[4px] hover:shadow-[0_4px_0_#b59a6d] active:translate-y-[8px] active:shadow-none"
+                      }`}
+                      onClick={() => typeChar(letter.toLowerCase())}
+                    >
+                      {!used ? <div className="grain-overlay absolute inset-0 rounded-xl opacity-5 transition-opacity group-hover:opacity-10"></div> : null}
+                      <span className={`font-headline text-3xl font-extrabold ${used ? "text-on-surface-variant/50" : "text-on-secondary"}`}>{letter}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex w-full flex-wrap justify-center gap-4 sm:gap-6">
+                <button
+                  className="flex min-w-[140px] flex-col items-center gap-0.5 rounded-xl bg-surface-container-high px-8 py-4 font-headline text-lg font-bold text-on-surface transition-all hover:bg-surface-container-highest active:scale-95"
+                  type="button"
+                  onClick={shuffleRack}
+                >
+                  <span>Shuffle</span>
+                  <span className="font-label text-[10px] font-semibold uppercase tracking-[0.2em] text-on-surface-variant/85">Shift</span>
+                </button>
+                <button
+                  className="flex min-w-[160px] flex-col items-center gap-0.5 rounded-xl bg-primary px-10 py-4 font-headline text-lg font-bold text-on-primary shadow-xl shadow-primary/20 transition-all hover:opacity-90 active:scale-95"
+                  type="button"
+                  onClick={() => void submit()}
+                >
+                  <span>Submit</span>
+                  <span className="font-label text-[10px] font-semibold uppercase tracking-[0.2em] text-on-primary/80">Enter</span>
+                </button>
+                <button
+                  className="flex min-w-[140px] flex-col items-center gap-0.5 rounded-xl bg-surface-container-low px-8 py-4 font-headline text-lg font-bold text-on-surface-variant transition-all hover:bg-surface-container-high active:scale-95"
+                  type="button"
+                  onClick={clearWord}
+                >
+                  <span>Clear</span>
+                  <span className="font-label text-[10px] font-semibold uppercase tracking-[0.2em] text-on-surface-variant/80">Esc</span>
+                </button>
+              </div>
+            </>
+          ) : null}
+
+          {flight ? <TileFlightLayer key={flight.id} flight={flight} onComplete={clearFlight} /> : null}
+        </div>
+      </main>
+    </>
   );
 }

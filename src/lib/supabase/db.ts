@@ -113,7 +113,7 @@ export async function submitWord(lobbyId: string, playerId: string, word: string
     .eq("word", valid.word)
     .maybeSingle();
 
-  if (existing) throw new Error("Already submitted.");
+    if (existing) throw new Error("Already used.");
 
   const { error: insertError } = await supabase
     .from("submissions")

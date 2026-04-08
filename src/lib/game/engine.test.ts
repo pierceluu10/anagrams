@@ -1,7 +1,7 @@
 /** Swagrams — engine tests */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { canBuildFromRack, scoreWord, validateSubmission } from "@/lib/game/engine";
+import { canBuildFromRack, rackIndicesForTypedWord, scoreWord, validateSubmission } from "@/lib/game/engine";
 
 describe("game engine", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -12,9 +12,16 @@ describe("game engine", () => {
   });
 
   it("scores by word length", () => {
-    expect(scoreWord("cat")).toBe(1);
-    expect(scoreWord("tame")).toBe(2);
-    expect(scoreWord("stream")).toBe(7);
+    expect(scoreWord("cat")).toBe(100);
+    expect(scoreWord("tame")).toBe(400);
+    expect(scoreWord("steam")).toBe(1200);
+    expect(scoreWord("stream")).toBe(2000);
+  });
+
+  it("assigns greedy rack indices for multiset typing order", () => {
+    expect(rackIndicesForTypedWord("ab", "baba")).toEqual([1, 0]);
+    expect(rackIndicesForTypedWord("", "stream")).toEqual([]);
+    expect(rackIndicesForTypedWord("steam", "stream").length).toBe(5);
   });
 
   it("rejects word shorter than 3 letters without fetching", async () => {
@@ -39,7 +46,7 @@ describe("game engine", () => {
     expect(result.valid).toBe(true);
     if (result.valid) {
       expect(result.word).toBe("master");
-      expect(result.score).toBe(7);
+      expect(result.score).toBe(2000);
     }
   });
 

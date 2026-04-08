@@ -68,7 +68,7 @@ export function useSoloStitchGame() {
     if (!active) return;
     setError("");
     if (submittedWords.includes(typed.toLowerCase())) {
-      setError("Already submitted.");
+      setError("Already used.");
       return;
     }
     const result = await validateSubmission(typed, round.rack);
@@ -155,6 +155,7 @@ export function useSoloStitchGame() {
 
   return {
     active,
+    started,
     completed,
     countdown,
     start,
@@ -168,6 +169,7 @@ export function useSoloStitchGame() {
     slotLetters,
     letterButtons,
     rack: round.rack,
+    displayRack: rack,
     typed,
     setTyped,
     submit,

@@ -6,9 +6,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { RackView } from "@/components/RackView";
+import { CountdownPulse } from "@/components/stitch/CountdownPulse";
 import { StickyScoreboard } from "@/components/stitch/StickyScoreboard";
+import { TileFlightLayer, type TileFlightPayload } from "@/components/stitch/TileFlightLayer";
 import { TimerRing } from "@/components/stitch/TimerRing";
+import { SubmissionFeedback } from "@/components/stitch/SubmissionFeedback";
 import { WordSlots } from "@/components/stitch/WordSlots";
+import { rackIndicesForTypedWord } from "@/lib/game/engine";
 import { lobbyApi, type LobbySnapshot } from "@/lib/multiplayer/api";
 import { getSupabaseClient } from "@/lib/supabase/client";
 
@@ -53,6 +57,11 @@ export default function MatchPage() {
   const [playerId, setPlayerId] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
   const hasSeenActiveRound = useRef(false);
+  const [flight, setFlight] = useState<TileFlightPayload | null>(null);
+  const flightId = useRef(0);
+  const prevWordLen = useRef(0);
+  const rackTileRefs = useRef<(HTMLDivElement | null)[]>([]);
+  const slotRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   useEffect(() => {
     const id = setTimeout(() => {
@@ -190,6 +199,64 @@ export default function MatchPage() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [activeRound, submitWord]);
 
+  const rackVisual = displayRack || activeRound?.rack || "";
+
+  const clearFlight = useCallback(() => setFlight(null), []);
+
+  const prevWordStr = useRef("");
+
+  useEffect(() => {
+    if (!activeRound) {
+      prevWordLen.current = word.length;
+      prevWordStr.current = word;
+      return;
+    }
+    const prevLen = prevWordLen.current;
+    const curLen = word.length;
+
+    if (curLen > prevLen && rackVisual.length >= 6) {
+      const indices = rackIndicesForTypedWord(word, rackVisual);
+      const rackIdx = indices[indices.length - 1];
+      const slotIdx = curLen - 1;
+      const ch = word[slotIdx];
+      if (ch !== undefined && rackIdx !== undefined) {
+        const rackEl = rackTileRefs.current[rackIdx];
+        const slotEl = slotRefs.current[slotIdx];
+        if (rackEl && slotEl) {
+          flightId.current += 1;
+          setFlight({
+            id: flightId.current,
+            char: ch,
+            from: rackEl.getBoundingClientRect(),
+            to: slotEl.getBoundingClientRect()
+          });
+        }
+      }
+    } else if (curLen < prevLen && rackVisual.length >= 6) {
+      const removedChar = prevWordStr.current[prevLen - 1];
+      const prevIndices = rackIndicesForTypedWord(prevWordStr.current, rackVisual);
+      const rackIdx = prevIndices[prevLen - 1];
+      const slotIdx = prevLen - 1;
+      if (removedChar !== undefined && rackIdx !== undefined) {
+        const rackEl = rackTileRefs.current[rackIdx];
+        const slotEl = slotRefs.current[slotIdx];
+        if (rackEl && slotEl) {
+          flightId.current += 1;
+          setFlight({
+            id: flightId.current,
+            char: removedChar,
+            from: slotEl.getBoundingClientRect(),
+            to: rackEl.getBoundingClientRect(),
+            reverse: true
+          });
+        }
+      }
+    }
+
+    prevWordLen.current = curLen;
+    prevWordStr.current = word;
+  }, [word, activeRound, rackVisual]);
+
   useEffect(() => {
     if (countdown === null) return;
     if (countdown <= 0) {
@@ -214,11 +281,13 @@ export default function MatchPage() {
         </div>
 
         <div className="flex flex-col items-center gap-8 lg:col-span-9">
-          <TimerRing
-            remainingMs={activeRound ? remaining : 0}
-            totalMs={activeRound ? totalMs : 60_000}
-            label={formatTime(activeRound ? remaining : 0)}
-          />
+          {activeRound ? (
+            <TimerRing
+              remainingMs={remaining}
+              totalMs={totalMs}
+              label={formatTime(remaining)}
+            />
+          ) : null}
 
           <p className="w-full text-center font-body text-sm text-on-surface-variant">
             Lobby {state?.lobby.code ?? "…"} · {lobbyStatus}
@@ -235,12 +304,15 @@ export default function MatchPage() {
             </button>
           ) : null}
 
-          {countdown !== null ? <p className="stitch-countdown">{countdown}</p> : null}
+          {!activeRound && countdown !== null ? <CountdownPulse value={countdown} /> : null}
 
           {activeRound ? (
             <>
-              <WordSlots word={word} />
-              <RackView rack={displayRack || activeRound.rack} />
+              <div className="mx-auto flex w-full max-w-2xl flex-col items-center gap-2">
+                <SubmissionFeedback message={error} className="w-full" />
+                <WordSlots word={word} slotRefs={slotRefs} />
+              </div>
+              <RackView rack={rackVisual} tileRefs={rackTileRefs} />
 
               <div className="stitch-actions">
                 <button type="button" onClick={() => setDisplayRack((value) => shuffleRack(value || activeRound.rack))}>
@@ -256,10 +328,11 @@ export default function MatchPage() {
                   <span className="stitch-actions__key">Esc</span>
                 </button>
               </div>
+              {flight ? <TileFlightLayer key={flight.id} flight={flight} onComplete={clearFlight} /> : null}
             </>
-          ) : (
+          ) : countdown === null && !canStart ? (
             <p className="text-center font-body text-sm text-on-surface-variant">Waiting for round start.</p>
-          )}
+          ) : null}
 
           <div className="row wrap center" style={{ justifyContent: "center", marginTop: 8 }}>
             <button type="button" onClick={() => void lobbyApi.toggleReady(lobbyId, playerId, !me?.is_ready)}>
@@ -276,7 +349,7 @@ export default function MatchPage() {
             </button>
           </div>
 
-          {error ? <p className="error center">{error}</p> : null}
+          {!activeRound && error ? <p className="error center">{error}</p> : null}
         </div>
       </div>
     </main>
