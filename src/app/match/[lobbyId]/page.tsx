@@ -117,6 +117,7 @@ export default function MatchPage() {
 
   const me = state?.players.find((p) => p.id === playerId);
   const activeRound = state?.round && state.round.status === "active" ? state.round : null;
+  const readyCount = state ? state.players.filter((p) => p.is_ready).length : 0;
 
   const totalMs = activeRound
     ? Math.max(1, new Date(activeRound.ends_at).getTime() - new Date(activeRound.started_at).getTime())
@@ -273,7 +274,18 @@ export default function MatchPage() {
     return () => window.clearTimeout(timer);
   }, [countdown, lobbyId]);
 
-  const canStart = !!state && state.players.length >= 2 && !activeRound;
+  const canStart = !!state && readyCount >= 2 && !activeRound;
+
+  const handleToggleReady = useCallback(async () => {
+    if (!playerId) return;
+    try {
+      const nextReady = !(me?.is_ready ?? false);
+      await lobbyApi.toggleReady(lobbyId, playerId, nextReady);
+      setError("");
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }, [lobbyId, playerId, me?.is_ready]);
 
   const handleCopyCode = useCallback(async () => {
     const code = state?.lobby.code;
@@ -349,23 +361,57 @@ export default function MatchPage() {
                   <span className="font-headline text-base font-bold text-on-surface">
                     {player.display_name}
                   </span>
-                  {player.id === playerId ? (
-                    <span className="ml-auto font-label text-[10px] uppercase tracking-wider text-primary">You</span>
-                  ) : null}
+                  <div className="ml-auto flex items-center gap-2">
+                    {player.is_ready ? (
+                      <span className="rounded-full bg-primary/15 px-2 py-1 font-label text-[10px] font-bold uppercase tracking-wider text-primary">
+                        Ready
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-surface-container-high px-2 py-1 font-label text-[10px] font-bold uppercase tracking-wider text-on-surface-variant/70">
+                        Not ready
+                      </span>
+                    )}
+                    {player.id === playerId ? (
+                      <span className="font-label text-[10px] uppercase tracking-wider text-primary">You</span>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>
           </SurfaceCard>
 
+          {/* Ready */}
+          <div className="flex w-full flex-col items-center gap-3">
+            <SlabButton
+              variant={me?.is_ready ? "tan" : "muted"}
+              type="button"
+              onClick={handleToggleReady}
+              disabled={!playerId}
+            >
+              <span>{me?.is_ready ? "Ready ✓" : "Ready up"}</span>
+            </SlabButton>
+            <p className="font-body text-xs text-on-surface-variant">
+              {readyCount}/2 players ready
+            </p>
+          </div>
+
           {/* Waiting / Start */}
           <div className="flex w-full flex-col items-center gap-4">
             {canStart ? (
-              <SlabButton variant="lavender" type="button" onClick={() => setCountdown(3)}>
+              <SlabButton
+                variant="lavender"
+                type="button"
+                onClick={() => setCountdown(3)}
+                disabled={!me?.is_ready}
+              >
                 <span>Start game</span>
               </SlabButton>
             ) : (
               <p className="font-body text-sm text-on-surface-variant">
-                Waiting for players<span className="waiting-dots"></span>
+                {state && state.players.length >= 2
+                  ? "Need at least two ready players."
+                  : "Waiting for players"}
+                <span className="waiting-dots"></span>
               </p>
             )}
           </div>
