@@ -1,1 +1,0 @@
-Swagrams — @AGENTS.md
